@@ -1,0 +1,12 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: waservix
+Description: WAservix WhatsApp API Gateway client for C and C++
+URL: https://tekservix.com/waservix/docs/
+Version: @PROJECT_VERSION@
+Requires.private: libcurl
+Libs: -L${libdir} -lwaservix
+Cflags: -I${includedir}

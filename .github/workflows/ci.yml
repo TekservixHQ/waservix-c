@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }} (${{ matrix.shared && 'shared' || 'static' }}${{ matrix.sanitize && ', sanitizers' || '' }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, shared: false, sanitize: true}
+          - {os: ubuntu-latest, shared: true, sanitize: false}
+          - {os: macos-latest, shared: false, sanitize: false}
+          - {os: macos-latest, shared: true, sanitize: false}
+          - {os: windows-latest, shared: false, sanitize: false}
+          - {os: windows-latest, shared: true, sanitize: false}
+    env:
+      WASERVIX_LIVE_TEST: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libcurl (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Install libcurl (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install curl:x64-windows
+          echo "TOOLCHAIN=-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> "$GITHUB_ENV"
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S . -B build $TOOLCHAIN
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_SHARED_LIBS=${{ matrix.shared && 'ON' || 'OFF' }}
+          -DWASERVIX_BUILD_EXAMPLES=ON
+          -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+          ${{ matrix.sanitize && '-DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined' || '' }}
+      - name: Build
+        run: cmake --build build --config Debug
+      - name: Test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then export PATH="$VCPKG_INSTALLATION_ROOT/installed/x64-windows/debug/bin:$VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin:$PWD/build/Debug:$PATH"; fi
+          ctest --test-dir build -C Debug --output-on-failure
+      - name: Install and use with find_package
+        shell: bash
+        run: |
+          cmake --install build --config Debug --prefix "$PWD/stage"
+          mkdir consumer && cd consumer
+          printf 'cmake_minimum_required(VERSION 3.15)\nproject(c LANGUAGES C)\nfind_package(waservix 1.0 REQUIRED)\nadd_executable(c main.c)\ntarget_link_libraries(c PRIVATE waservix::waservix)\n' > CMakeLists.txt
+          printf '#include <waservix/waservix.h>\n#include <stdio.h>\nint main(void){waservix_client *c=waservix_client_new("wpk_x");printf("%%s %%d\\n",WASERVIX_VERSION,c!=0);waservix_client_free(c);return 0;}\n' > main.c
+          cmake -S . -B b $TOOLCHAIN -DCMAKE_PREFIX_PATH="$PWD/../stage" -DCMAKE_BUILD_TYPE=Debug
+          cmake --build b --config Debug
