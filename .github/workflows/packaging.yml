@@ -1,0 +1,54 @@
+name: packaging
+
+on:
+  push:
+    branches: [main]
+    paths: ['packaging/**', '.github/workflows/packaging.yml']
+  workflow_dispatch:
+
+jobs:
+  vcpkg:
+    name: vcpkg (${{ matrix.triplet }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, triplet: x64-linux}
+          - {os: windows-latest, triplet: x64-windows}
+          - {os: windows-latest, triplet: x64-windows-static}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Manifest is formatted
+        shell: bash
+        run: |
+          cp packaging/vcpkg/waservix/vcpkg.json /tmp/before.json
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" format-manifest packaging/vcpkg/waservix/vcpkg.json
+          diff /tmp/before.json packaging/vcpkg/waservix/vcpkg.json
+      - name: Install the port
+        shell: bash
+        run: '"$VCPKG_INSTALLATION_ROOT/vcpkg" install waservix:${{ matrix.triplet }} --overlay-ports=packaging/vcpkg'
+      - name: Use it from CMake
+        shell: bash
+        run: |
+          cmake -S packaging/conan/all/test_package -B tp             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DCMAKE_BUILD_TYPE=Release
+          cmake --build tp --config Release
+          if [ "$RUNNER_OS" = "Windows" ]; then ./tp/Release/test_package.exe; else ./tp/test_package; fi
+
+  conan:
+    name: conan (${{ matrix.os }}, shared=${{ matrix.shared }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        shared: ['False', 'True']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install "conan>=2.0,<3"
+      - run: conan profile detect
+      - name: Create the package
+        run: conan create packaging/conan/all --version 1.0.0 --build=missing -o "&:shared=${{ matrix.shared }}"
