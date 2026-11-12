@@ -48,8 +48,9 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then export PATH="$VCPKG_INSTALLATION_ROOT/installed/x64-windows/debug/bin:$VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin:$PWD/build/Debug:$PATH"; fi
-          ctest --test-dir build -C Debug --output-on-failure
+          ctest --test-dir build -C Debug -V
       - name: Install and use with find_package
+        if: ${{ !matrix.sanitize }}
         shell: bash
         run: |
           cmake --install build --config Debug --prefix "$PWD/stage"
